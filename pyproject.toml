@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "word-cli-demo"
+version = "0.1.0"
+description = "Command-line vocabulary practice demo"
+authors = [
+  { name = "Demo" }
+]
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+dependencies = [
+  "rich>=13.7",
+  "prompt-toolkit>=3.0",
+  "rapidfuzz>=3.9"
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3"]
+
+[project.scripts]
+word-cli = "word_cli.cli:main"
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
