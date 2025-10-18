@@ -33,11 +33,11 @@ class AppConfig:
     daily_new_limit: int = 50
     daily_review_limit: int = 150
     similarity_candidates: int = 25
+    words_file: str = "data/words.csv"
     session_storage_path: str = "data/progress.json"
     export_path: str = "data/export.csv"
     extra_batch_ratio: float = 0.1
     settlement_auto_advance_ms: int = -1
-    words_file: str = "data/words.csv"
     random_new_selection: bool = True
 
     @classmethod

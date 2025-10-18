@@ -6,6 +6,7 @@ import time
 from collections import deque
 from datetime import date
 from typing import Callable, Deque, Iterable, List, Sequence, Tuple, Union
+from dataclasses import dataclass
 
 from prompt_toolkit import prompt  # type: ignore[import]
 from prompt_toolkit.key_binding import KeyBindings  # type: ignore[import]
@@ -38,11 +39,9 @@ class PracticeSession:
         self.translations = {entry.headword: entry.translation for entry in repo}
         self.queue: Deque[SessionItem] = self._build_queue()
         self.undo_stack: List[UndoAction] = []
-        self.total_unique = 0
         self.last_log: str | Text | None = None
         # Track words that have already been downgraded once in this session
         self.downgraded_today: set[str] = set()
-        self._update_total_unique()
         self.key_bindings = self._build_key_bindings()
 
     # Public API ---------------------------------------------------------
@@ -83,10 +82,6 @@ class PracticeSession:
             queue.append(SessionItem(headword=headword, is_new=False))
         return queue
 
-    def _update_total_unique(self) -> None:
-        unique_words = set(self.session_state.new_words) | set(self.session_state.review_words)
-        self.total_unique = len(unique_words)
-
     def _shuffle_queue_in_chunks(self) -> None:
         items = list(self.queue)
         items = _chunked_shuffle(items, chunk_size=50)
@@ -96,8 +91,8 @@ class PracticeSession:
         self._clear_main_screen()
         self._render_columns()
 
-        _, _, _, new_total, _, review_total = self._progress_summary()
-        summary_line = f"今日任务已完成。已新学 {new_total} 词，复习 {review_total} 词。"
+        ps = self._progress_summary()
+        summary_line = f"今日任务已完成。已新学 {ps['new_total']} 词，复习 {ps['review_total']} 词。"
         self._render_columns(left=summary_line)
         self._render_columns()
 
@@ -173,8 +168,6 @@ class PracticeSession:
             extra_review = max(1, math.ceil(self.config.daily_review_limit * ratio))
 
         all_words = self.repo.all_words()
-        existing_new = set(self.session_state.new_words)
-        existing_review = set(self.session_state.review_words)
         completed_words = set(self.session_state.completed)
 
         new_candidates: List[str] = []
@@ -185,11 +178,11 @@ class PracticeSession:
             if state.mastered:
                 continue
             if state.level == -2:
-                if headword in existing_new:
+                if headword in completed_words:
                     continue
                 new_candidates.append(headword)
             elif 1 <= state.level <= 5:
-                if headword in existing_review:
+                if headword in completed_words:
                     continue
                 review_candidates.append((headword, state))
         additions: List[SessionItem] = []
@@ -217,26 +210,33 @@ class PracticeSession:
         additions_list = _chunked_shuffle(additions_list, chunk_size=50)
         self.queue.extend(additions_list)
         self._shuffle_queue_in_chunks()
-        self._update_total_unique()
         self.store.upsert_session(self.session_state)
         self.store.save()
         return True
 
     # Rendering ---------------------------------------------------------
-    def _progress_summary(self) -> tuple[int, int, int, int, int, int]:
+    def _progress_summary(self) -> dict[str, int]:
         new_total = len(self.session_state.new_words)
         review_total = len(self.session_state.review_words)
+        unique_total = len(set(self.session_state.new_words) | set(self.session_state.review_words))
         completed_set = set(self.session_state.completed)
         completed_new = len([w for w in self.session_state.new_words if w in completed_set])
         completed_review = len([w for w in self.session_state.review_words if w in completed_set])
         total_completed = len(completed_set)
-        return total_completed, self.total_unique, completed_new, new_total, completed_review, review_total
+        return {
+            "total_completed": total_completed,
+            "total_unique": unique_total,
+            "completed_new": completed_new,
+            "new_total": new_total,
+            "completed_review": completed_review,
+            "review_total": review_total,
+        }
 
     def _render_header(self, entry: WordEntry, state: WordState) -> None:
         self._clear_main_screen()
-        total_completed, total_total, *_ = self._progress_summary()
-        percent = (total_completed / total_total * 100) if total_total else 0.0
-        progress_text = f"{total_completed}/{total_total} ({percent:04.1f}%)"
+        ps = self._progress_summary()
+        percent = (ps["total_completed"] / ps["total_unique"] * 100) if ps["total_unique"] else 0.0
+        progress_text = f"{ps['total_completed']}/{ps['total_unique']} ({percent:04.1f}%)"
         self._render_columns(right=progress_text)
 
         level_text = self._level_visual(state.level)
@@ -260,7 +260,10 @@ class PracticeSession:
         self._render_columns()
         option_labels = ["认识", "不认识", "模糊"]
         for idx, label in enumerate(option_labels, start=1):
-            prefix = f"[[blue]{idx}[/blue]]  "
+            if settlement:
+                prefix = f"[{idx}]  "
+            else:
+                prefix = f"[[blue]{idx}[/blue]]  "
             subsequent = " " * (len(f"[{idx}]  "))
             option_lines = self._prefix_lines(label, prefix, subsequent)
             style = highlight.get(str(idx))
@@ -268,13 +271,17 @@ class PracticeSession:
             self._render_columns(left=rendered_lines)
 
         self._render_columns()
-        base_mastered = "[9]  已掌握"
-        if highlight.get("9"):
-            mastered_line = self._stylize_markup(base_mastered, highlight["9"])
-        elif highlight:
-            mastered_line = base_mastered
+        # 统一规则：
+        # - 非结算态：可选，数字蓝色
+        # - 结算态：默认无样式；若 highlight["9"] 存在则按其样式渲染
+        if settlement:
+            base_mastered = "[9]  已掌握"
+            if highlight.get("9"):
+                mastered_line = self._stylize_markup(base_mastered, highlight["9"])
+            else:
+                mastered_line = base_mastered
         else:
-            mastered_line = self._stylize_markup(base_mastered, "dim")
+            mastered_line = "[[blue]9[/blue]]  已掌握"
         self._render_columns(left=mastered_line)
         if settlement:
             helper_line = "[dim][Backspace] undo · [Enter] next · [Ctrl+C] / [Ctrl+D] exit[/]"
@@ -305,25 +312,27 @@ class PracticeSession:
                 self._render_columns(left=option_lines)
             self._render_columns(left="[[blue]5[/blue]]  不认识")
             self._render_columns()
-            self._render_columns(left="[dim][9]  已掌握[/]")
+            self._render_columns(left="[[blue]9[/blue]]  已掌握")
             self._render_columns(left="[dim][Ctrl+C] / [Ctrl+D] exit[/]")
             self._render_log_section()
             return
 
         for idx, text in enumerate(options, start=1):
             word = option_words[idx - 1] if idx - 1 < len(option_words) else ""
-            style = "bold red" if highlight_all_red else highlight.get(idx)
+            style = "red" if highlight_all_red else highlight.get(idx)
             self._render_settlement_option(idx, text, word, style)
 
-        self._render_columns(left="[[blue]5[/blue]]  不认识")
+        if 5 in highlight:
+            dont_know_text = self._stylize_markup("[5]  不认识", highlight[5])
+        else:
+            dont_know_text = "[5]  不认识"
+        self._render_columns(left=dont_know_text)
 
         self._render_columns()
         if 9 in highlight:
             mastered_text = self._stylize_markup("[9]  已掌握", highlight[9])
-        elif highlight:
-            mastered_text = "[9]  已掌握"
         else:
-            mastered_text = self._stylize_markup("[9]  已掌握", "dim")
+            mastered_text = "[9]  已掌握"
         self._render_columns(left=mastered_text)
         self._render_columns(left="[dim][Backspace] undo · [Enter] next · [Ctrl+C] / [Ctrl+D] exit[/]")
         self._render_log_section()
@@ -466,7 +475,6 @@ class PracticeSession:
         self.store.upsert_session(self.session_state)
         self.store.save()
 
-        self._update_total_unique()
         self.undo_stack.append(undo_action)
 
         highlight: dict[str, str] = {}
@@ -524,7 +532,7 @@ class PracticeSession:
             state.mastered = state.level > 4
             outcome = "incorrect"
             highlight_all_red = True
-            highlight[5] = "bold red"
+            highlight[5] = "red"
             require_enter = True
         else:
             selected_idx = int(choice) - 1
@@ -574,7 +582,6 @@ class PracticeSession:
         self.store.upsert_session(self.session_state)
         self.store.save()
 
-        self._update_total_unique()
         self.undo_stack.append(undo_action)
 
         settlement_highlight = dict(highlight)
@@ -620,7 +627,6 @@ class PracticeSession:
             self.downgraded_today.discard(action.word)
         self.store.upsert_session(self.session_state)
         self.store.save()
-        self._update_total_unique()
         return True
 
     # Helpers -----------------------------------------------------------
