@@ -37,7 +37,7 @@ class AppConfig:
     session_storage_path: str = "data/progress.json"
     export_path: str = "data/export.csv"
     extra_batch_ratio: float = 0.1
-    settlement_auto_advance_ms: int = -1
+    settlement_auto_advance_ms: int = 500
     random_new_selection: bool = True
 
     @classmethod

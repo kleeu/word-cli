@@ -20,9 +20,9 @@ from .scheduler import prepare_daily_session
 from .similarity import pick_distractors
 from .storage import ProgressStore, WordRepository
 from .scheduler import _chunked_shuffle
+from .ui import ConsoleUI, ColumnInput
 
 
-ColumnInput = Union[str, Text, Sequence[Union[str, Text]]]
 
 
 class SessionAbort(RuntimeError):
@@ -32,6 +32,7 @@ class SessionAbort(RuntimeError):
 class PracticeSession:
     def __init__(self, config: AppConfig, repo: WordRepository, store: ProgressStore, today: date | None = None):
         self.console = Console()
+        self.ui = ConsoleUI(self.console)
         self.config = config
         self.repo = repo
         self.store = store
@@ -39,7 +40,6 @@ class PracticeSession:
         self.translations = {entry.headword: entry.translation for entry in repo}
         self.queue: Deque[SessionItem] = self._build_queue()
         self.undo_stack: List[UndoAction] = []
-        self.last_log: str | Text | None = None
         # Track words that have already been downgraded once in this session
         self.downgraded_today: set[str] = set()
         self.key_bindings = self._build_key_bindings()
@@ -106,35 +106,11 @@ class PracticeSession:
                 if state.level >= threshold:
                     level_counts[threshold] += 1
 
-        color_map = {
-            1: "red",
-            2: "orange3",
-            3: "yellow3",
-            4: "green",
-            5: "green",
-        }
-
-        width = self.console.width or 80
-        segments = width - 30
-
         for level in range(1, 6):
             count = level_counts[level]
-            ratio = count / repo_total if repo_total else 0.0
-            filled = max(0, min(segments, round(ratio * segments)))
-
-            bar = Text(f"lvl>={level}", style=color_map[level])
-            bar.append(" [")
-            for idx in range(segments):
-                char = "=" if idx < filled else " "
-                segment = Text(char)
-                if idx < filled:
-                    segment.stylize(color_map[level])
-                bar.append_text(segment)
-            bar.append("]")
-
-            percent = ratio * 100
-            stats = Text(f"{count}/{repo_total} ({percent:04.1f}%)")
-            self._render_columns(left=bar, right=stats)
+            self.ui.render_ratio_bar_and_stat(
+                label=f"lvl>={level}", count=count, total=repo_total, level=level
+            )
 
         self._render_columns()
         self._render_columns(left="[1]  结束")
@@ -478,18 +454,23 @@ class PracticeSession:
         self.undo_stack.append(undo_action)
 
         highlight: dict[str, str] = {}
+        require_enter = False
         if choice == '1':
             highlight[choice] = "green"
+            require_enter = self.config.settlement_auto_advance_ms < 0
         elif choice == '2':
             highlight[choice] = "red"
+            require_enter = True
         elif choice == '3':
             highlight[choice] = "yellow"
+            require_enter = True
         elif choice == "9":
             highlight["9"] = "bold"
+            require_enter = True
         settlement_highlight = dict(highlight)
         self._render_new_card(entry, state, highlight=settlement_highlight, settlement=True)
         result = self._wait_for_settlement(
-            require_enter=self.config.settlement_auto_advance_ms < 0,
+            require_enter=require_enter,
             refresh=lambda: self._render_new_card(entry, state, highlight=settlement_highlight, settlement=True),
         )
         if result == "UNDO":
@@ -523,7 +504,7 @@ class PracticeSession:
             state.mastered = True
             outcome = "mastered"
             highlight[9] = "bold"
-            require_enter = self.config.settlement_auto_advance_ms < 0
+            require_enter = True
         elif choice == "5":
             # Incorrect: apply at most one downgrade per word per session
             if item.headword not in self.downgraded_today:
@@ -668,8 +649,7 @@ class PracticeSession:
         center: ColumnInput | None = None,
         right: ColumnInput | None = None,
     ) -> None:
-        for line in self._compose_column_rows(left, center, right):
-            self.console.print(line)
+        self.ui.render_columns(left=left, center=center, right=right)
 
     def _compose_column_rows(
         self,
@@ -677,104 +657,16 @@ class PracticeSession:
         center: ColumnInput | None,
         right: ColumnInput | None,
     ) -> List[Text]:
-        width = self.console.width or 80
-        left_lines = self._normalize_column_input(left)
-        center_lines = self._normalize_column_input(center)
-        right_lines = self._normalize_column_input(right)
-        if not any((left_lines, center_lines, right_lines)):
-            return [Text("")]
-
-        total_lines = max(len(left_lines), len(center_lines), len(right_lines))
-        result: List[Text] = []
-        for idx in range(total_lines):
-            left_text = left_lines[idx] if idx < len(left_lines) else Text("")
-            center_text = center_lines[idx] if idx < len(center_lines) else Text("")
-            right_text = right_lines[idx] if idx < len(right_lines) else Text("")
-            result.append(self._compose_column_row(left_text, center_text, right_text, width))
-        return result
+        return self.ui.compose_column_rows(left, center, right)
 
     def _normalize_column_input(self, value: ColumnInput | None) -> List[Text]:
-        if value is None:
-            return []
-        if isinstance(value, Text):
-            return [value.copy()]
-        if isinstance(value, Sequence) and not isinstance(value, (str, Text)):
-            collected: List[Text] = []
-            for item in value:
-                collected.extend(self._normalize_column_input(item))
-            return collected
-        text_obj = self._to_text(value)
-        segments = text_obj.split("\n")
-        if not segments:
-            segments = [Text("")]
-        return [segment.copy() for segment in segments]
+        return self.ui.normalize_column_input(value)
 
     def _to_text(self, value: str | Text) -> Text:
-        if isinstance(value, Text):
-            return value.copy()
-        try:
-            return Text.from_markup(str(value), emoji=False)
-        except MarkupError:
-            return Text(str(value))
+        return self.ui.to_text(value)
 
     def _compose_column_row(self, left: Text, center: Text, right: Text, width: int) -> Text:
-        line = Text()
-        width = max(width, 1)
-
-        left_text = left.copy()
-        center_text = center.copy()
-        right_text = right.copy()
-
-        left_len = left_text.cell_len
-        center_len = center_text.cell_len
-        right_len = right_text.cell_len
-
-        min_total = left_len + center_len + right_len
-        if left_len and center_len:
-            min_total += 1
-        if center_len and right_len:
-            min_total += 1
-        if left_len and not center_len and right_len:
-            min_total += 1
-        width = max(width, min_total)
-
-        cursor = 0
-
-        def append_spaces(target: int) -> None:
-            nonlocal cursor
-            spaces = max(0, target - cursor)
-            if spaces:
-                line.append(" " * spaces)
-                cursor += spaces
-
-        def append_text(segment: Text) -> None:
-            nonlocal cursor
-            seg_len = segment.cell_len
-            if seg_len:
-                line.append_text(segment)
-                cursor += seg_len
-
-        if left_len:
-            append_text(left_text)
-
-        if center_len:
-            min_pos = cursor + (1 if cursor else 0)
-            desired = (width - center_len) // 2
-            desired = max(desired, min_pos)
-            desired = min(desired, width - center_len)
-            desired = max(desired, min_pos)
-            append_spaces(desired)
-            append_text(center_text)
-
-        if right_len:
-            min_pos = cursor + (1 if cursor else 0)
-            desired = max(width - right_len, min_pos)
-            append_spaces(desired)
-            append_text(right_text)
-
-        if line.cell_len == 0:
-            return Text("")
-        return line
+        return self.ui.compose_column_row(left, center, right, width)
 
     def _render_settlement_option(
         self,
@@ -796,40 +688,19 @@ class PracticeSession:
             self._render_columns(left=continuation)
 
     def _clear_main_screen(self) -> None:
-        self.console.clear()
-        self._render_columns()
-        self._render_columns()
+        self.ui.clear_main_screen()
 
     def _set_log(self, message: str | Text | None, *, immediate: bool = False) -> None:
-        if message is None:
-            self.last_log = None
-        else:
-            self.last_log = message
-        if immediate and message:
-            self._print_log_line(message)
+        self.ui.set_log(message, immediate=immediate)
 
     def _print_log_line(self, message: str | Text) -> None:
-        self._render_columns()
-        prefix = Text("[log]", style="dim")
-        body = self._to_text(message)
-        if not body.spans:
-            body.stylize("dim")
-        combined = Text()
-        combined.append_text(prefix)
-        combined.append(" ")
-        combined.append_text(body)
-        self._render_columns(left=combined)
-        self.last_log = None
+        self.ui.print_log_line(message)
 
     def _render_log_section(self) -> None:
-        if not self.last_log:
-            return
-        self._print_log_line(self.last_log)
+        self.ui.render_log_section()
 
     def _stylize_markup(self, text: str, style: str | None) -> str:
-        if not style:
-            return text
-        return f"[{style}]{text}[/]"
+        return self.ui.stylize_markup(text, style)
 
 
     def _find_headword_for_translation(self, translation: str, exclude: set[str]) -> str:

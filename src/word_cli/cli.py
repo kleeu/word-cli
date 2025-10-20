@@ -15,6 +15,7 @@ from rich.table import Table  # type: ignore[import]
 from .config import AppConfig
 from .practice import PracticeSession
 from .storage import ProgressStore, WordRepository
+from .ui import ConsoleUI
 
 
 class CliApp:
@@ -28,11 +29,14 @@ class CliApp:
         self.repo = WordRepository(words_path)
         self.store = ProgressStore(self._resolve_path(self.config.session_storage_path))
         self.menu_bindings = self._build_menu_bindings()
+        self.ui = ConsoleUI(self.console)
 
     def run(self) -> None:
         while True:
             self.console.clear()
-            self.console.print(Panel("Word CLI", title="主菜单", border_style="cyan"))
+            # Compose menu header panel with current dictionary, recent activity, and level progress
+            header = self._build_menu_header()
+            self.console.print(Panel(header, title="Word CLI", border_style="cyan"))
             table = Table(show_header=False, box=None, expand=False)
             table.add_row("[1]", "开始")
             table.add_row("[2]", "修改配置")
@@ -123,6 +127,49 @@ class CliApp:
         if result and result in {str(i) for i in range(1, max_choice + 1)}:
             return result
         return "4"
+
+    # Menu header ------------------------------------------------------
+    def _build_menu_header(self) -> "ConsoleRenderable":  # type: ignore[name-defined]
+        """Build the header content for the main menu panel.
+
+        First line: current dictionary (words file)
+        Second line: recent activity time (latest history record date if any)
+        Third~seventh lines: five level progress bars with stats
+        """
+        from rich.text import Text
+        from rich.console import Group
+
+        items: list[Text] = []
+
+        # 1) Current dictionary
+        words_file = str(self._resolve_path(self.config.words_file))
+        items.append(Text(f"Curr Dict: {words_file}"))
+
+        # 2) Recent activity (latest history date)
+        history = self.store.data.get("history", [])
+        recent = history[-1]["date"] if history else "null"
+        items.append(Text(f"Last Seen: {recent}"))
+
+        # 3) Level progress 1..5
+        repo_words = list(self.repo.all_words().keys())
+        repo_total = max(len(repo_words), 1)
+        level_counts = {level: 0 for level in range(1, 6)}
+        for headword in repo_words:
+            state = self.store.get_word_state(headword)
+            for threshold in range(1, 6):
+                if state.level >= threshold:
+                    level_counts[threshold] += 1
+
+        width = self.console.width or 80
+        width -= 4 # leave space for panel borders
+        for level in range(1, 6):
+            count = level_counts[level]
+            line = self.ui.build_ratio_bar_and_stat(
+                label=f"lvl>={level}", count=count, total=repo_total, level=level, width=width
+            )
+            items.append(line)
+
+        return Group(*items)
 
     def _parse_config_input(self, raw: str, target_type: type[Any]) -> Any:
         if target_type is bool:
