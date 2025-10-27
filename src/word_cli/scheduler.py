@@ -181,7 +181,7 @@ def prepare_daily_session(
         return existing
 
     # Ensure progress store has all repo words initialized to -2 on first run
-    word_repo_path = getattr(config, "words_file", None)
+    word_repo_path = getattr(config, "default_words_file", None)
     try:
         from pathlib import Path as _P
         store.ensure_all_words_initialized(word_repo, _P(word_repo_path) if word_repo_path else None)

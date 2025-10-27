@@ -135,3 +135,66 @@ class ProgressStore:
     # Utility ------------------------------------------------------------
     def snapshot(self) -> Dict[str, Any]:
         return deepcopy(self.data)
+
+
+# Archive helpers ---------------------------------------------------------------
+def is_valid_archive_payload(data: Any) -> bool:
+    """Basic check to decide whether a JSON payload can be treated as an archive.
+
+    Rules:
+    - Prefer meta.app_id/schema_version markers
+    - Otherwise accept dicts containing at least 'words' and 'history'
+    """
+    if not isinstance(data, dict):
+        return False
+    meta = data.get("meta", {})
+    if isinstance(meta, dict) and meta.get("app_id") in {"word-cli", "word-cli-demo"}:
+        return True
+    return ("words" in data and isinstance(data.get("words"), dict) and "history" in data)
+
+
+def distribution_1to5_percent(words: Dict[str, Any]) -> str:
+    """Return a compact percent string for levels 1..5, ignoring 'new' bucket.
+
+    Percent denominator is total words count to keep scale comparable across archives.
+    Format: 'p1|p2|p3|p4|p5' where each is like '12.3%'.
+    """
+    total = max(len(words or {}), 1)
+    buckets = {1: 0, 2: 0, 3: 0, 4: 0, 5: 0}
+    for _w, meta in (words or {}).items():
+        try:
+            lvl = meta.get("level", -2)
+        except AttributeError:
+            lvl = -2
+        if lvl in buckets:
+            buckets[lvl] += 1
+
+    def pct(n: int) -> str:
+        return f"{(n/total*100):.1f}%"
+
+    return "|".join([pct(buckets[i]) for i in range(1, 6)])
+
+
+def count_words_in_payload(words: Dict[str, Any]) -> int:
+    try:
+        return len(words or {})
+    except Exception:
+        return 0
+
+
+def validate_archive_name(name: str, forbidden_file_names: set[str] | None = None) -> tuple[bool, str | None]:
+    """Validate an archive name. Allows A-Za-z0-9_- only.
+
+    Optionally forbid specific target file names (e.g., session_storage_path basename).
+    Returns (ok, error_message)."""
+    import re
+
+    if not name:
+        return False, "名称为空"
+    if not re.fullmatch(r"[A-Za-z0-9_-]+", name):
+        return False, "仅允许字母、数字、下划线和短横线"
+    if forbidden_file_names:
+        target = f"{name}.json"
+        if target in forbidden_file_names:
+            return False, f"禁止使用 {target} 作为存档名"
+    return True, None

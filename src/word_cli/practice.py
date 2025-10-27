@@ -87,6 +87,23 @@ class PracticeSession:
         items = _chunked_shuffle(items, chunk_size=50)
         self.queue = deque(items)
 
+    def _insert_into_first_chunk(self, items: Sequence[SessionItem], chunk_size: int = 50) -> None:
+        """Insert given items into the first chunk of the queue.
+
+        - Choose an insertion index uniformly within [0, first_chunk_end]
+        - Keep items order as given; caller may pre-shuffle if needed
+        - Afterwards, perform a chunked shuffle so the items stay within the first chunk
+        """
+        if not items:
+            return
+        q = list(self.queue)
+        first_chunk_end = min(chunk_size, len(q))
+        insert_at = random.randint(0, first_chunk_end) if first_chunk_end >= 0 else 0
+        for offset, it in enumerate(items):
+            q.insert(insert_at + offset, it)
+        self.queue = deque(q)
+        self._shuffle_queue_in_chunks()
+
     def _render_post_cycle_prompt(self) -> None:
         self._clear_main_screen()
         self._render_columns()
@@ -181,11 +198,9 @@ class PracticeSession:
         if not additions:
             return False
 
-        # when inserting additions, shuffle each 50-word chunk to avoid long tail
+        # Insert extra batch into the first chunk to surface them sooner
         additions_list = list(additions)
-        additions_list = _chunked_shuffle(additions_list, chunk_size=50)
-        self.queue.extend(additions_list)
-        self._shuffle_queue_in_chunks()
+        self._insert_into_first_chunk(additions_list, chunk_size=50)
         self.store.upsert_session(self.session_state)
         self.store.save()
         return True
@@ -391,7 +406,7 @@ class PracticeSession:
                     continue
                 if result in ("", "\r", "\n"):
                     return "CONTINUE"
-                self._set_log("[yellow]请按 Enter 继续。[/]", immediate=True)
+                self._set_log("[yellow]请按 Enter 继续。[/]", immediate=False)
                 if refresh:
                     refresh()
         else:
@@ -444,10 +459,9 @@ class PracticeSession:
             if item.headword not in self.session_state.completed:
                 self.session_state.completed.append(item.headword)
         else:
-            # For 0/-1/-2: always add to queue (new: level -2; others considered review)
+            # For 0/-1/-2: always requeue. Insert into first chunk to review sooner.
             is_new_flag = state.level == -2
-            self.queue.append(SessionItem(headword=item.headword, is_new=is_new_flag))
-            self._shuffle_queue_in_chunks()
+            self._insert_into_first_chunk([SessionItem(headword=item.headword, is_new=is_new_flag)], chunk_size=50)
         self.store.upsert_session(self.session_state)
         self.store.save()
 
@@ -555,10 +569,9 @@ class PracticeSession:
             if item.headword not in self.session_state.completed:
                 self.session_state.completed.append(item.headword)
         else:
-            # level < 1: requeue (treat -1,0 as review; -2 as new)
+            # level < 1: requeue (treat -1,0 as review; -2 as new) into first chunk
             is_new_flag = state.level == -2
-            self.queue.append(SessionItem(headword=item.headword, is_new=is_new_flag))
-            self._shuffle_queue_in_chunks()
+            self._insert_into_first_chunk([SessionItem(headword=item.headword, is_new=is_new_flag)], chunk_size=50)
 
         self.store.upsert_session(self.session_state)
         self.store.save()

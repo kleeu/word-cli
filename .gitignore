@@ -4,7 +4,8 @@ __pycache__/
 .venv/
 env/
 venv/
-data/
+data/*
+!data/words.csv
 *.egg-info/
 
 .vscode/

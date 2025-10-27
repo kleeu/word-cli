@@ -60,6 +60,64 @@ def _simple_inflection_equiv(a: str, b: str) -> bool:
     return (na in fb) or (nb in fa) or bool(fa & fb)
 
 
+def _derivational_equiv(a: str, b: str) -> bool:
+    """Heuristic: treat common derivational pairs as equivalent to avoid trivial distractors.
+
+    Covered families (symmetric):
+    - adj -> adv: base+ly, ble->bly, y->ily
+    - verb -> noun: +tion, te->tion (drop e), and some -sion patterns: ide/ode/ude/use->ision/osion/usion, mit->mission
+    - adj -> noun: ant/ent -> ance/ence
+    """
+    na, nb = _normalize(a), _normalize(b)
+    if len(na) <= 1 or len(nb) <= 1:
+        return True
+    if na == nb:
+        return True
+
+    def forms(base: str) -> set[str]:
+        f: set[str] = set()
+        if not base:
+            return f
+        # adj -> adv
+        f.add(base + "ly")
+        if base.endswith("ble") and len(base) > 3:
+            # possible -> possibly (ble->bly)
+            f.add(base[:-1] + "y")
+        if base.endswith("y") and len(base) > 1:
+            # happy -> happily (y->ily)
+            f.add(base[:-1] + "ily")
+
+        # verb -> noun (-tion)
+        f.add(base + "tion")
+        if base.endswith("te") and len(base) > 2:
+            # operate/create -> operation/creation (te->tion by dropping e)
+            f.add(base[:-1] + "ion")
+
+        # verb -> noun (-sion patterns; heuristic)
+        sion_map = (
+            ("ide", "ision"),   # decide -> decision, collide -> collision
+            ("ode", "osion"),   # explode -> explosion
+            ("ude", "usion"),   # conclude -> conclusion
+            ("use", "usion"),   # confuse -> confusion
+            ("mit", "mission"), # permit -> permission
+        )
+        for suf, repl in sion_map:
+            if base.endswith(suf) and len(base) > len(suf):
+                f.add(base[: -len(suf)] + repl)
+
+        # adj -> noun (-ance/-ence)
+        if base.endswith("ant") and len(base) > 3:
+            f.add(base[:-3] + "ance")
+        if base.endswith("ent") and len(base) > 3:
+            f.add(base[:-3] + "ence")
+
+        return f
+
+    fa = forms(na)
+    fb = forms(nb)
+    return (na in fb) or (nb in fa) or bool(fa & fb)
+
+
 def pick_distractors(
     target: str,
     candidates: Iterable[str],
@@ -76,7 +134,7 @@ def pick_distractors(
 
     def consider(headword: str) -> bool:
         # filter trivial variants and very short tokens
-        if _simple_inflection_equiv(target, headword):
+        if _simple_inflection_equiv(target, headword) or _derivational_equiv(target, headword):
             return False
         norm_len = len(_normalize(headword))
         if norm_len <= 1:

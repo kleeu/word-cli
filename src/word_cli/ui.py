@@ -257,7 +257,10 @@ class ConsoleUI:
 
 		bar = self.build_ratio_bar(label=label, count=count, total=total, width=segments, color=use_color)
 		percent = (count / max(total, 1) * 100.0) if total else 0.0
-		stats = Text(f"{count}/{total if total else 1} ({percent:04.1f}%)")
+		if percent == 100.0:
+			stats = Text(f"{count}/{total if total else 1} ( ALL )")
+		else:
+			stats = Text(f"{count}/{total if total else 1} ({percent:04.1f}%)")
 		# Compose a single row with left bar and right stats
 		row = self.compose_column_row(bar, Text(""), stats, term_width)
 		return row
