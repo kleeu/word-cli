@@ -78,6 +78,7 @@ class CliApp:
         self.console.print(Panel("修改配置 (按回车保持原值)", title="配置", border_style="blue"))
         updates: Dict[str, Any] = {}
         descriptions = AppConfig.descriptions()
+        cancel_notice = "[yellow]配置修改已取消，返回主菜单。[/yellow]"
         for field in fields(AppConfig):
             current = getattr(self.config, field.name)
             target_type = self._config_field_types.get(field.name, type(current))
@@ -85,7 +86,10 @@ class CliApp:
             if desc:
                 self.console.print(f"[dim]{field.name}：{desc}[/dim]")
             prompt_text = f"{field.name} (当前 {current}): "
-            user_input = input(prompt_text).strip()
+            user_input_raw = self._safe_input(prompt_text, cancel_message=cancel_notice)
+            if user_input_raw is None:
+                return
+            user_input = user_input_raw.strip()
             if not user_input:
                 continue
             try:
@@ -100,7 +104,7 @@ class CliApp:
         else:
             self.console.print("[yellow]未作任何更改。[/yellow]")
         self.console.print("[dim]按回车返回菜单…[/dim]")
-        input()
+        self._safe_input()
 
     def _archive_menu(self) -> None:
         def shorten_right(s: str, max_len: int = 40) -> str:
@@ -194,6 +198,7 @@ class CliApp:
             try:
                 key = prompt("", key_bindings=kb)
             except (EOFError, KeyboardInterrupt):
+                self.console.print("[yellow]存档读档已取消，返回主菜单。[/yellow]")
                 return
             if key == "up":
                 cur = (cur - 1) % len(rows)
@@ -432,7 +437,7 @@ class CliApp:
         """).strip()
         self.console.print(Panel(Markdown(help_text), title="帮助", border_style="blue"))
         self.console.print("[dim]按回车返回菜单…[/dim]")
-        input()
+        self._safe_input(cancel_message="[yellow]已返回主菜单。[/yellow]")
 
     def _build_menu_header(self) -> "ConsoleRenderable":  # type: ignore[name-defined]
         from rich.text import Text
@@ -480,6 +485,13 @@ class CliApp:
             return float(raw)
         return raw
 
+    def _safe_input(self, prompt_text: str = "", *, cancel_message: str | None = None) -> str | None:
+        try:
+            return input(prompt_text)
+        except (EOFError, KeyboardInterrupt):
+            if cancel_message:
+                self.console.print(cancel_message)
+            return None
 
 def main() -> None:
     app = CliApp()

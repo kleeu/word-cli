@@ -275,9 +275,9 @@ class PracticeSession:
             mastered_line = "[[blue]9[/blue]]  已掌握"
         self._render_columns(left=mastered_line)
         if settlement:
-            helper_line = "[dim][Backspace] undo · [Enter] next · [Ctrl+C] / [Ctrl+D] exit[/]"
+            helper_line = "[dim][Backspace] undo · [Enter]/[Space] next · [Ctrl+C]/[Ctrl+D] exit[/]"
         else:
-            helper_line = "[dim][Ctrl+C] / [Ctrl+D] exit[/]"
+            helper_line = "[dim][Ctrl+C]/[Ctrl+D] exit[/]"
         self._render_columns(left=helper_line)
         self._render_log_section()
 
@@ -304,7 +304,7 @@ class PracticeSession:
             self._render_columns(left="[[blue]5[/blue]]  不认识")
             self._render_columns()
             self._render_columns(left="[[blue]9[/blue]]  已掌握")
-            self._render_columns(left="[dim][Ctrl+C] / [Ctrl+D] exit[/]")
+            self._render_columns(left="[dim][Ctrl+C]/[Ctrl+D] exit[/]")
             self._render_log_section()
             return
 
@@ -325,7 +325,7 @@ class PracticeSession:
         else:
             mastered_text = "[9]  已掌握"
         self._render_columns(left=mastered_text)
-        self._render_columns(left="[dim][Backspace] undo · [Enter] next · [Ctrl+C] / [Ctrl+D] exit[/]")
+        self._render_columns(left="[dim][Backspace] undo · [Enter]/[Space] next · [Ctrl+C]/[Ctrl+D] exit[/]")
         self._render_log_section()
 
     def _render_completion(self) -> None:
@@ -353,6 +353,8 @@ class PracticeSession:
             bind_key(f"kp-{digit}", digit)
             bind_key(f"numpad{digit}", digit)
 
+        bind_key("enter", "CONTINUE")
+        bind_key("space", "CONTINUE")
         bind_key("backspace", "UNDO")
         bind_key("c-z", "UNDO")
         bind_key("c-c", "QUIT")
@@ -404,9 +406,9 @@ class PracticeSession:
                     if refresh:
                         refresh()
                     continue
-                if result in ("", "\r", "\n"):
+                if result in ("CONTINUE", "", " ", "\r", "\n"):
                     return "CONTINUE"
-                self._set_log("[yellow]请按 Enter 继续。[/]", immediate=False)
+                self._set_log("[yellow]请按 Enter 或 Spacebar 继续。[/]", immediate=False)
                 if refresh:
                     refresh()
         else:
@@ -479,7 +481,7 @@ class PracticeSession:
             highlight[choice] = "yellow"
             require_enter = True
         elif choice == "9":
-            highlight["9"] = "bold"
+            highlight["9"] = "bold green"
             require_enter = True
         settlement_highlight = dict(highlight)
         self._render_new_card(entry, state, highlight=settlement_highlight, settlement=True)
@@ -517,7 +519,7 @@ class PracticeSession:
             state.level = 5
             state.mastered = True
             outcome = "mastered"
-            highlight[9] = "bold"
+            highlight[9] = "bold green"
             require_enter = True
         elif choice == "5":
             # Incorrect: apply at most one downgrade per word per session
