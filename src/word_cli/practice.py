@@ -275,7 +275,7 @@ class PracticeSession:
             mastered_line = "[[blue]9[/blue]]  已掌握"
         self._render_columns(left=mastered_line)
         if settlement:
-            helper_line = "[dim][Backspace] undo · [Enter]/[Space] next · [Ctrl+C]/[Ctrl+D] exit[/]"
+            helper_line = "[dim][Backspace]/[`] undo · [Enter]/[Space] next · [Ctrl+C]/[Ctrl+D] exit[/]"
         else:
             helper_line = "[dim][Ctrl+C]/[Ctrl+D] exit[/]"
         self._render_columns(left=helper_line)
@@ -325,7 +325,7 @@ class PracticeSession:
         else:
             mastered_text = "[9]  已掌握"
         self._render_columns(left=mastered_text)
-        self._render_columns(left="[dim][Backspace] undo · [Enter]/[Space] next · [Ctrl+C]/[Ctrl+D] exit[/]")
+        self._render_columns(left="[dim][Backspace]/[`] undo · [Enter]/[Space] next · [Ctrl+C]/[Ctrl+D] exit[/]")
         self._render_log_section()
 
     def _render_completion(self) -> None:
@@ -356,6 +356,8 @@ class PracticeSession:
         bind_key("enter", "CONTINUE")
         bind_key("space", "CONTINUE")
         bind_key("backspace", "UNDO")
+        bind_key("`", "UNDO")
+        bind_key("·", "UNDO")
         bind_key("c-z", "UNDO")
         bind_key("c-c", "QUIT")
         bind_key("c-d", "QUIT")
