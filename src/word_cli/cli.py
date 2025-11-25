@@ -38,6 +38,7 @@ class CliApp:
         words_path = self._resolve_path(self.config.default_words_file)
         self.repo = WordRepository(words_path)
         self.store = ProgressStore(self._resolve_path(self.config.session_storage_path))
+        
         self.menu_bindings = self._build_menu_bindings()
         self.ui = ConsoleUI(self.console)
 
@@ -70,6 +71,27 @@ class CliApp:
 
     # Menu actions ------------------------------------------------------
     def _start_session(self) -> None:
+        # Checksum validation
+        current_checksum = self.repo.get_checksum()
+        stored_checksum = (self.store.data.get("meta", {}) or {}).get("dict_checksum")
+
+        if stored_checksum and stored_checksum != current_checksum:
+            msg = (
+                f"[bold yellow]警告：字典校验和不匹配[/bold yellow]\n\n"
+                f"当前加载的字典文件与存档中记录的字典版本不一致。\n"
+                f"当前: [cyan]0x{current_checksum}[/cyan]\n"
+                f"存档: [cyan]0x{stored_checksum}[/cyan]\n\n"
+                f"这可能是因为您修改了字典文件内容或替换了文件。\n"
+                f"继续操作将覆盖存档中的校验和记录。如果字典内容发生了实质性变更，可能会导致学习进度错乱。\n\n"
+                f"是否继续？(输入 [bold green]y[/bold green] 继续，直接回车返回菜单)"
+            )
+            self.console.clear()
+            self.console.print(Panel(msg, title="校验和检查", border_style="yellow"))
+            choice = self._safe_input("确认继续？[y/N]: ")
+            if not choice or choice.strip().lower() != "y":
+                self.console.print("[yellow]操作已取消。[/yellow]")
+                return
+
         session = PracticeSession(self.config, self.repo, self.store, today=date.today())
         session.run()
 
@@ -361,6 +383,7 @@ class CliApp:
                 "last_saved": datetime.now().isoformat(timespec="seconds"),
                 "current_archive_name": name,
                 "words_file": rel_path,
+                "dict_checksum": repo.get_checksum(),
             },
         }
 
@@ -445,7 +468,20 @@ class CliApp:
 
         items: list[Text] = []
         words_file = str(self._resolve_path(self.config.default_words_file))
-        items.append(Text(f"Curr Dict: {words_file}"))
+        
+        # Checksum display
+        current_checksum = self.repo.get_checksum()
+        stored_checksum = (self.store.data.get("meta", {}) or {}).get("dict_checksum")
+        
+        # Display only last 4 chars on home screen
+        display_current = current_checksum[-4:] if current_checksum else "?"
+        
+        if stored_checksum and stored_checksum != current_checksum:
+            checksum_text = f" (0x{display_current}, [red][!] 与存档文件使用的字典校验和不同[/red])"
+        else:
+            checksum_text = f" (0x{display_current})"
+            
+        items.append(Text.from_markup(f"Curr Dict: {words_file}{checksum_text}"))
 
         history = self.store.data.get("history", [])
         recent = history[-1]["date"] if history else "null"

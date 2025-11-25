@@ -253,7 +253,7 @@ class ConsoleUI:
 		default_colors = {1: "red", 2: "orange3", 3: "yellow3", 4: "green", 5: "green"}
 		use_color = color or (default_colors.get(level, "green") if level is not None else "green")
 		term_width = width if width is not None else (self.console.width or 80)
-		segments = max(0, term_width - 30)
+		segments = self.compute_bar_width("distribution", width=term_width)
 
 		bar = self.build_ratio_bar(label=label, count=count, total=total, width=segments, color=use_color)
 		percent = (count / max(total, 1) * 100.0) if total else 0.0
@@ -264,4 +264,20 @@ class ConsoleUI:
 		# Compose a single row with left bar and right stats
 		row = self.compose_column_row(bar, Text(""), stats, term_width)
 		return row
+
+	def compute_bar_width(self, context: str = "distribution", width: int | None = None) -> int:
+		"""Centralized logic for calculating progress bar widths based on context.
+
+		Contexts:
+		- 'distribution': Level distribution bars (includes label space). Formula: width - 30
+		- 'session': Top header session progress bar (no label, just stats). Formula: width - 23
+		"""
+		term_width = width if width is not None else (self.console.width or 80)
+
+		if context == "session":
+			# User requested: distribution length + 7
+			return max(0, term_width - 23)
+		
+		# Default 'distribution'
+		return max(0, term_width - 30)
 

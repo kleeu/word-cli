@@ -36,6 +36,11 @@ class PracticeSession:
         self.config = config
         self.repo = repo
         self.store = store
+        
+        # Update dictionary checksum in store metadata
+        self.store.data.setdefault("meta", {})["dict_checksum"] = self.repo.get_checksum()
+        self.store.save()
+
         self.session_state = prepare_daily_session(repo, store, config, today)
         self.translations = {entry.headword: entry.translation for entry in repo}
         self.queue: Deque[SessionItem] = self._build_queue()
@@ -226,6 +231,7 @@ class PracticeSession:
     def _render_header(self, entry: WordEntry, state: WordState) -> None:
         self._clear_main_screen()
         ps = self._progress_summary()
+        
         percent = (ps["total_completed"] / ps["total_unique"] * 100) if ps["total_unique"] else 0.0
         progress_text = f"{ps['total_completed']}/{ps['total_unique']} ({percent:04.1f}%)"
         self._render_columns(right=progress_text)
@@ -299,7 +305,15 @@ class PracticeSession:
             for idx, text in enumerate(options, start=1):
                 prefix = f"[[blue]{idx}[/blue]]  "
                 subsequent = " " * (len(f"[{idx}]  "))
-                option_lines = self._prefix_lines(text, prefix, subsequent)
+                
+                # Option 2 and 4 use a light grey color to distinguish
+                if idx % 2 == 0:
+                    # Using a hex color for light grey to ensure it's close to white but distinct
+                    text_markup = f"[#bfbfbf]{text}[/#bfbfbf]"
+                else:
+                    text_markup = text
+
+                option_lines = self._prefix_lines(text_markup, prefix, subsequent)
                 self._render_columns(left=option_lines)
             self._render_columns(left="[[blue]5[/blue]]  不认识")
             self._render_columns()
@@ -310,7 +324,16 @@ class PracticeSession:
 
         for idx, text in enumerate(options, start=1):
             word = option_words[idx - 1] if idx - 1 < len(option_words) else ""
-            style = "red" if highlight_all_red else highlight.get(idx)
+            
+            # Determine style: specific highlight takes precedence over global red
+            specific_style = highlight.get(idx)
+            if specific_style:
+                style = specific_style
+            elif highlight_all_red:
+                style = "red"
+            else:
+                style = None
+                
             self._render_settlement_option(idx, text, word, style)
 
         if 5 in highlight:
@@ -531,6 +554,7 @@ class PracticeSession:
             state.mastered = state.level > 4
             outcome = "incorrect"
             highlight_all_red = True
+            highlight[correct_idx + 1] = "green"  # Show correct answer in green
             highlight[5] = "red"
             require_enter = True
         else:
@@ -568,14 +592,16 @@ class PracticeSession:
         self.store.append_history(record)
 
         # Queue updates per new rules
-        if state.level >= 1:
-            # Upgraded to >=1 or remained >=1: consider done for today, do not requeue
-            if item.headword not in self.session_state.completed:
-                self.session_state.completed.append(item.headword)
-        else:
-            # level < 1: requeue (treat -1,0 as review; -2 as new) into first chunk
+        # Fix: If incorrect, always requeue regardless of level.
+        # Otherwise, only complete if level >= 1.
+        if outcome == "incorrect" or state.level < 1:
+            # Requeue into first chunk
             is_new_flag = state.level == -2
             self._insert_into_first_chunk([SessionItem(headword=item.headword, is_new=is_new_flag)], chunk_size=50)
+        else:
+            # Correct and level >= 1: consider done for today
+            if item.headword not in self.session_state.completed:
+                self.session_state.completed.append(item.headword)
 
         self.store.upsert_session(self.session_state)
         self.store.save()

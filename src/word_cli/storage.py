@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -13,6 +14,7 @@ class WordRepository:
     def __init__(self, csv_path: Path):
         self.csv_path = csv_path
         self._word_map = self._load_words(csv_path)
+        self._checksum: str | None = None
 
     @staticmethod
     def _load_words(csv_path: Path) -> Dict[str, WordEntry]:
@@ -37,6 +39,23 @@ class WordRepository:
 
     def get(self, headword: str) -> WordEntry:
         return self._word_map[headword]
+
+    def get_checksum(self) -> str:
+        """Calculate a stable checksum of the loaded dictionary content."""
+        if self._checksum is not None:
+            return self._checksum
+
+        # Sort by headword to ensure stability
+        sorted_items = sorted(self._word_map.items())
+        hasher = hashlib.sha256()
+        for headword, entry in sorted_items:
+            # Feed headword and translation
+            hasher.update(headword.encode("utf-8"))
+            hasher.update(entry.translation.encode("utf-8"))
+
+        full_hash = hasher.hexdigest()
+        self._checksum = full_hash
+        return self._checksum
 
     def __iter__(self) -> Iterator[WordEntry]:
         return iter(self._word_map.values())
